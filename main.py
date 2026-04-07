@@ -469,6 +469,9 @@ def main():
 
             # 3. 로그인 버튼 클릭
             log("3. 로그인 버튼 클릭...")
+            if DEBUG_DUMP:
+                page.screenshot(path="screenshot_before_login.png")
+                dump_page_html(page, suffix="before_login")
             page.locator("text=로그인").first.click()
             page.wait_for_timeout(1000)
 

@@ -459,7 +459,15 @@ def main():
         try:
             # 1. 사이트 접속
             log("\n1. 사이트 접속...")
-            page.goto(BASE_URL)
+            for _attempt in range(3):
+                try:
+                    page.goto(BASE_URL)
+                    break
+                except Exception as e:
+                    if _attempt == 2:
+                        raise
+                    log(f"   → 접속 실패 (재시도 {_attempt + 1}/2): {e}")
+                    page.wait_for_timeout(5000)
             page.wait_for_timeout(1000)
 
             # 2. 팝업 닫기
@@ -633,6 +641,11 @@ def main():
                 log(f"   → {cfg['board_station_kw']} 라디오 클릭 실패: {e}")
                 notify_failure(f"{cfg['board_station_kw']} 선택", e, page.url if page else "")
                 dump_page_html(page, force=True, suffix="fail_step13")
+
+        except Exception as e:
+            log(f"\n❌ 예기치 않은 에러 발생: {e}")
+            notify_failure("예기치 않은 에러", e, page.url if page else "")
+            dump_page_html(page, force=True, suffix="fail_unexpected")
 
         finally:
             try:

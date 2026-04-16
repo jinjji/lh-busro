@@ -10,8 +10,10 @@ import logging
 import time
 import re
 import json
+import random
 from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
+from playwright_stealth.stealth import Stealth
 from datetime import datetime
 import requests
 
@@ -334,12 +336,34 @@ def extract_seat_availability(page) -> dict:
 # --------------------------------------------------
 # 유틸
 # --------------------------------------------------
+def rnd_wait(page, min_ms: int, max_ms: int) -> None:
+    """인간처럼 랜덤 딜레이"""
+    ms = random.randint(min_ms, max_ms)
+    page.wait_for_timeout(ms)
+
+
+def human_click(locator) -> None:
+    """hover 후 짧은 딜레이 → 클릭"""
+    locator.hover()
+    time.sleep(random.uniform(0.1, 0.35))
+    locator.click()
+
+
+def human_type(locator, text: str) -> None:
+    """한 글자씩 랜덤 딜레이로 입력"""
+    locator.click()
+    time.sleep(random.uniform(0.2, 0.5))
+    for char in text:
+        locator.press(char)
+        time.sleep(random.uniform(0.05, 0.18))
+
+
 def close_popup_if_exists(page) -> bool:
     """팝업이 있으면 닫기"""
     try:
         close_btn = page.locator("text=닫기").first
         if close_btn.is_visible(timeout=1500):
-            close_btn.click()
+            human_click(close_btn)
             log("   → 팝업 닫음!")
             return True
     except Exception:
@@ -447,8 +471,23 @@ def main():
     log(f"로그인 정보: {username} / {'*' * len(password)}")
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=HEADLESS)
-        page = browser.new_page()
+        browser = p.chromium.launch(
+            headless=HEADLESS,
+            args=["--disable-blink-features=AutomationControlled"],
+            slow_mo=random.randint(30, 80),
+        )
+        context = browser.new_context(
+            user_agent=(
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            ),
+            viewport={"width": 1280, "height": 800},
+            locale="ko-KR",
+            timezone_id="Asia/Seoul",
+        )
+        page = context.new_page()
+        Stealth().apply_stealth_sync(page)
 
         def handle_dialog(dialog):
             log(f"   ★ Alert 감지! 메시지: {dialog.message}")
@@ -473,46 +512,46 @@ def main():
             # 2. 팝업 닫기
             log("2. 팝업 확인...")
             close_popup_if_exists(page)
-            page.wait_for_timeout(1000)
+            rnd_wait(page, 800, 1500)
 
             # 3. 로그인 버튼 클릭
             log("3. 로그인 버튼 클릭...")
             if DEBUG_DUMP:
                 page.screenshot(path="screenshot_before_login.png")
                 dump_page_html(page, suffix="before_login")
-            page.locator("text=로그인").first.click()
-            page.wait_for_timeout(1000)
+            human_click(page.locator("text=로그인").first)
+            rnd_wait(page, 800, 1500)
 
             # 4. 로그인 정보 입력
             log("4. 로그인 정보 입력...")
-            page.locator("#m_id").fill(username)
-            page.locator('input[type="password"]').first.fill(password)
-            page.wait_for_timeout(500)
+            human_type(page.locator("#m_id"), username)
+            human_type(page.locator('input[type="password"]').first, password)
+            rnd_wait(page, 300, 800)
 
             # 5. 로그인 제출
             log("5. 로그인 제출...")
-            page.locator('button:has-text("로그인")').click()
-            page.wait_for_timeout(2000)
+            human_click(page.locator('button:has-text("로그인")'))
+            rnd_wait(page, 1500, 3000)
 
             # 6. 팝업 확인
             log("6. 팝업 확인...")
             close_popup_if_exists(page)
-            page.wait_for_timeout(1000)
+            rnd_wait(page, 800, 1500)
 
             # 7. 방향 선택 (진주도착/진주출발)
             log("7. 방향 선택...")
             if cfg["direction"] == "in":
-                page.locator("#ln_direct1").click()
+                human_click(page.locator("#ln_direct1"))
                 log("   → 진주도착 선택 완료!")
             else:
-                page.locator("#ln_direct2").click()
+                human_click(page.locator("#ln_direct2"))
                 log("   → 진주출발 선택 완료!")
-            page.wait_for_timeout(1000)
+            rnd_wait(page, 800, 1500)
 
             # 8. 팝업 확인
             log("8. 팝업 확인...")
             close_popup_if_exists(page)
-            page.wait_for_timeout(1000)
+            rnd_wait(page, 800, 1500)
 
             # 9. 노선 선택
             log("9. 노선 선택...")
@@ -524,13 +563,13 @@ def main():
                 notify_failure("노선 선택", e, page.url if page else "")
                 dump_page_html(page, force=True, suffix="fail_step9")
                 return
-            page.wait_for_timeout(500)
+            rnd_wait(page, 300, 800)
 
             # 10. 조회 버튼 클릭
             log("10. 조회 버튼 클릭...")
-            page.locator('button:has-text("조회")').click()
+            human_click(page.locator('button:has-text("조회")'))
             log("   → 조회 클릭 완료!")
-            page.wait_for_timeout(3000)
+            rnd_wait(page, 2500, 4000)
 
             # 11. 팝업 확인
             log("11. 팝업 확인...")
@@ -541,7 +580,7 @@ def main():
                 log("   → mLayer_1 팝업 안 보임")
 
             close_popup_if_exists(page)
-            page.wait_for_timeout(1000)
+            rnd_wait(page, 800, 1500)
 
             # 12. 예약 버튼 클릭 (선택한 배차 시간대)
             log(f"\n12. 배차시간 '{cfg['dispatch_time_kw']}' 예약 버튼 찾기...")
@@ -549,7 +588,7 @@ def main():
             try:
                 row, picked_time = select_schedule_row_by_time(page, cfg["dispatch_time_kw"])
                 reserve_btn = row.locator("text=예약").first
-                reserve_btn.click()
+                human_click(reserve_btn)
                 log(f"   → {picked_time} 예약 버튼 클릭!")
 
                 wait_for_boarding_screen(page, timeout_ms=8000)
@@ -566,7 +605,7 @@ def main():
                 dump_page_html(page, force=True, suffix="fail_step12")
                 return
 
-            page.wait_for_timeout(1000)
+            rnd_wait(page, 800, 1500)
 
             # 13. 탑승장소 라디오 클릭
             log(f"\n13. {cfg['board_station_kw']} 선택박스(radio) 찾기...")
@@ -579,7 +618,7 @@ def main():
                 )
 
                 radio = target_row.locator('input[type="radio"]:visible').first
-                radio.click(force=True)
+                human_click(radio)
 
                 log(f"   → {cfg['board_station_kw']} 라디오 클릭 완료!")
 
@@ -587,7 +626,7 @@ def main():
                     page.wait_for_load_state("networkidle", timeout=10000)
                 except Exception:
                     pass
-                page.wait_for_timeout(1500)
+                rnd_wait(page, 1000, 2000)
 
                 # 좌석 선택 화면 진입 대기 + 좌석 파싱
                 try:
@@ -649,6 +688,7 @@ def main():
 
         finally:
             try:
+                context.close()
                 browser.close()
             except Exception:
                 pass

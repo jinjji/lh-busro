@@ -1,3 +1,4 @@
-playwright==1.49.1
-python-dotenv==1.0.1
-requests==2.32.3
+playwright==1.63.0
+python-dotenv==1.2.3
+requests==2.34.2
+playwright-stealth==2.0.3

@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LH버스로</title>
+  <style>
+    :root { font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif; color: #1f2937; background: #f4f6f8; }
+    body { max-width: 760px; margin: 36px auto; padding: 0 18px; }
+    h1 { margin: 0 0 24px; font-size: 25px; }
+    h2 { margin: 0 0 14px; font-size: 18px; }
+    section { background: white; border: 1px solid #e2e5e9; border-radius: 12px; padding: 20px; margin-bottom: 16px; }
+    #state { font-size: 20px; font-weight: 700; }
+    #details { color: #596579; line-height: 1.6; margin: 8px 0 0; }
+    .buttons { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 18px; }
+    button { border: 0; border-radius: 8px; padding: 10px 14px; background: #1261a0; color: white; font: inherit; cursor: pointer; }
+    button:disabled { background: #9ca7b4; cursor: default; }
+    #stop { background: #a83232; }
+    #message { min-height: 22px; margin: 12px 0 0; color: #3e4d5f; }
+    #message.error { color: #a83232; }
+    #history { padding: 0; margin: 0; list-style: none; }
+    #history li { border-top: 1px solid #eef0f2; }
+    #history button { width: 100%; text-align: left; background: transparent; color: #1f2937; padding: 12px 2px; }
+    #history button:hover { background: #f4f6f8; }
+    #history span { float: right; color: #596579; }
+    pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 420px; overflow: auto; background: #f5f7f9; padding: 14px; border-radius: 8px; font-size: 12px; line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <h1>LH버스로</h1>
+  <section>
+    <div id="state">상태 확인 중…</div>
+    <p id="details"></p>
+    <div class="buttons">
+      <button id="start">15분 반복 실행</button>
+      <button id="check">지금 1회 조회</button>
+      <button id="stop">중단</button>
+    </div>
+    <p id="message" role="status"></p>
+  </section>
+  <section>
+    <h2>최근 실행 결과</h2>
+    <ul id="history"><li>기록을 불러오는 중…</li></ul>
+  </section>
+  <section>
+    <h2 id="log-title">단계별 로그</h2>
+    <pre id="log">위에서 실행 기록을 선택하세요.</pre>
+  </section>
+  <script>
+    const token = "__DASHBOARD_TOKEN__";
+    let selected = "";
+    let acting = false;
+    function runTime(name) {
+      const match = /^(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})_\d+\.log$/.exec(name);
+      if (!match) return name;
+      return `${match[1]}-${match[2]}-${match[3]} ${match[4]}:${match[5]}:${match[6]}`;
+    }
+    async function api(path, method = "GET") {
+      const response = await fetch(path, {method, headers: {"X-Dashboard-Token": token}, cache: "no-store"});
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "요청에 실패했습니다");
+      return data;
+    }
+    function message(text, error = false) {
+      const element = document.getElementById("message");
+      element.textContent = text;
+      element.className = error ? "error" : "";
+    }
+    async function refresh() {
+      try {
+        const [status, entries] = await Promise.all([api("/api/status"), api("/api/logs")]);
+        const state = status.scheduler === "running" ? "15분 반복 실행 중" :
+                      status.scheduler === "unavailable" ? "상태 확인 불가" : "반복 실행 중지됨";
+        document.getElementById("state").textContent = state + (status.checking ? " · 조회 중" : "");
+        const next = status.next_run_at ? new Date(status.next_run_at * 1000).toLocaleString("ko-KR") : "없음";
+        const notify = status.notifications === null ? "확인 불가" : status.notifications ? "켬" : "끔";
+        document.getElementById("details").textContent = `다음 조회: ${next} · 디스코드 알림: ${notify}`;
+        document.getElementById("start").disabled = acting || status.scheduler !== "stopped" || status.checking;
+        document.getElementById("check").disabled = acting || status.checking || status.scheduler === "unavailable";
+        document.getElementById("stop").disabled = acting || (status.scheduler === "stopped" && !status.manual_checking);
+        const list = document.getElementById("history");
+        list.replaceChildren();
+        if (!entries.length) list.textContent = "아직 실행 기록이 없습니다.";
+        for (const entry of entries) {
+          const item = document.createElement("li");
+          const button = document.createElement("button");
+          const label = document.createTextNode(runTime(entry.name));
+          const result = document.createElement("span");
+          result.textContent = entry.result;
+          button.append(label, result);
+          button.onclick = () => showLog(entry.name);
+          item.append(button);
+          list.append(item);
+        }
+        if (selected && entries.some(item => item.name === selected)) await showLog(selected);
+      } catch (error) {
+        document.getElementById("state").textContent = "상태 확인 불가";
+        document.getElementById("start").disabled = true;
+        document.getElementById("check").disabled = true;
+        document.getElementById("stop").disabled = true;
+        message(error.message, true);
+      }
+    }
+    async function showLog(name) {
+      try {
+        const data = await api("/api/log?name=" + encodeURIComponent(name));
+        selected = name;
+        document.getElementById("log-title").textContent = "단계별 로그 · " + runTime(name);
+        document.getElementById("log").textContent = data.text;
+      } catch (error) { message(error.message, true); }
+    }
+    async function act(name) {
+      acting = true;
+      message("처리 중…");
+      for (const id of ["start", "check", "stop"]) document.getElementById(id).disabled = true;
+      try { message((await api("/api/" + name, "POST")).message); }
+      catch (error) { message(error.message, true); }
+      finally { acting = false; await refresh(); }
+    }
+    for (const id of ["start", "check", "stop"]) document.getElementById(id).onclick = () => act(id);
+    refresh();
+    setInterval(refresh, 3000);
+  </script>
+</body>
+</html>

@@ -1,0 +1,4 @@
+#!/bin/zsh
+project_dir="${0:A:h:h:h:h}"
+cd "$project_dir" || exit 1
+exec /Users/jinji/Coding/.venv/bin/python "$project_dir/dashboard.py" open

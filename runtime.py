@@ -5,6 +5,7 @@ from contextlib import contextmanager
 import fcntl
 import os
 from pathlib import Path
+import re
 import shutil
 import signal
 import subprocess
@@ -29,8 +30,10 @@ def run_lock(path: Path):
 def prune_logs(directory: Path, *, now: float | None = None) -> None:
     cutoff = (time.time() if now is None else now) - 14 * 86400
     for path in directory.iterdir():
-        # Only remove timestamped artifacts created by this application, not arbitrary files.
-        if path.is_symlink() or not path.name[:8].isdigit():
+        # Only remove recognized application artifacts, never arbitrary files.
+        is_run = bool(re.fullmatch(r"\d{8}_\d{6}(?:_\d+)?(?:\.log)?", path.name))
+        is_scheduler = bool(re.fullmatch(r"scheduler-\d{8}\.log", path.name))
+        if path.is_symlink() or not (is_run or is_scheduler):
             continue
         if path.stat().st_mtime < cutoff:
             if path.is_dir():

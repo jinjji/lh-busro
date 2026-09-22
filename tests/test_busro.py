@@ -29,13 +29,10 @@ class ConfigTests(unittest.TestCase):
         for secret in ('private-user', 'secret-password', 'abc', '/123/secret'):
             self.assertNotIn(secret, text)
 
-    def test_launchagent(self):
-        config = manage_schedule.configuration()
-        self.assertEqual(config['StartInterval'], 900)
-        self.assertTrue(config['RunAtLoad'])
-        self.assertNotIn('KeepAlive', config)
-        self.assertEqual(config['EnvironmentVariables']['LH_BUSRO_HEADLESS'], 'true')
-        self.assertEqual(config['ProgramArguments'][0], '/Users/jinji/Coding/.venv/bin/python')
+    def test_scheduler_skips_missed_slots(self):
+        self.assertEqual(manage_schedule.INTERVAL_SECONDS, 900)
+        self.assertEqual(manage_schedule.next_due(100, 100, 900), 1000)
+        self.assertEqual(manage_schedule.next_due(1000, 3000, 900), 3700)
 
 
 class RetryTests(unittest.TestCase):
@@ -252,14 +249,16 @@ class RuntimeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             directory = Path(folder)
             stale = directory / '20260101_000000.log'
+            scheduler_stale = directory / 'scheduler-20260101.log'
             keep = directory / 'notes.txt'
             fresh = directory / '20260922_000000.log'
-            for path in (stale, keep, fresh):
+            for path in (stale, scheduler_stale, keep, fresh):
                 path.write_text('test')
-            for path in (stale, keep):
+            for path in (stale, scheduler_stale, keep):
                 os.utime(path, (1, 1))
             runtime.prune_logs(directory)
             self.assertFalse(stale.exists())
+            self.assertFalse(scheduler_stale.exists())
             self.assertTrue(keep.exists())
             self.assertTrue(fresh.exists())
 
@@ -272,6 +271,40 @@ class RuntimeTests(unittest.TestCase):
             self.assertLess(time.monotonic() - started, 5)
             notify.assert_called_once()
             self.assertIn('시간 제한', (root / 'logs/20260101_test.log').read_text())
+
+
+class SchedulerTests(unittest.TestCase):
+    def test_background_start_duplicate_stop_and_stale_state(self):
+        with tempfile.TemporaryDirectory() as folder, redirect_stdout(io.StringIO()):
+            root = Path(folder)
+            (root / 'runtime.py').write_text('''from pathlib import Path
+import time
+Path('runs.txt').open('a').write('run\\n')
+time.sleep(30)
+''')
+            logs, _, socket_path, state_path = manage_schedule.paths(root)
+            logs.mkdir()
+            state_path.write_text('{"token":"stale","pid":12345}')
+            socket_path.touch()
+            started = manage_schedule.start(root, no_notify=True, interval=0.3)
+            self.assertEqual(started, 0, (logs / f"scheduler-{time.strftime('%Y%m%d')}.log").read_text())
+            try:
+                status = manage_schedule.request(root, 'status')
+                self.assertEqual(status['status'], 'running')
+                self.assertTrue(status['no_notify'])
+                self.assertEqual(manage_schedule.start(root, no_notify=False, interval=0.3), 0)
+                self.assertEqual(manage_schedule.request(root, 'status')['pid'], status['pid'])
+                deadline = time.monotonic() + 4
+                while not (root / 'runs.txt').exists() and time.monotonic() < deadline:
+                    time.sleep(0.05)
+                self.assertTrue((root / 'runs.txt').exists())
+                self.assertEqual(manage_schedule.stop(root), 0)
+                self.assertIsNone(manage_schedule.request(root, 'status'))
+                self.assertFalse(socket_path.exists())
+                self.assertFalse(state_path.exists())
+                self.assertEqual((root / 'runs.txt').read_text(), 'run\n')
+            finally:
+                manage_schedule.stop(root)
 
 
 if __name__ == '__main__':

@@ -133,6 +133,7 @@ def close_popup_if_exists(page) -> bool:
         candidates.last.click(timeout=3000)
         page.locator("#mLayer_1").wait_for(state="hidden", timeout=3000)
         closed = True
+        log("공지 팝업 닫기 완료")
     raise SiteError("공지 팝업이 반복해서 표시됩니다")
 
 
@@ -298,6 +299,7 @@ def run_attempt(cfg: dict, attempt: int) -> Result:
                 context.set_default_navigation_timeout(20000)
                 page = context.new_page()
                 Stealth().apply_stealth_sync(page)
+                log("브라우저 시작 완료")
                 dialogs = []
                 def on_dialog(dialog):
                     dialogs.append(dialog.message)
@@ -310,6 +312,7 @@ def run_attempt(cfg: dict, attempt: int) -> Result:
                 response = page.goto(BASE_URL, wait_until="domcontentloaded")
                 if response is not None and response.status >= 400:
                     raise SiteError(f"사이트 HTTP 오류: {response.status}")
+                log(f"{stage} 완료")
                 stage = "로그인 화면"
                 login_form = page.locator("#m_id")
                 wait_ready(page, lambda: login_form.is_visible() or page.get_by_text("로그인", exact=True).filter(visible=True).count() > 0,
@@ -317,43 +320,53 @@ def run_attempt(cfg: dict, attempt: int) -> Result:
                 if not login_form.is_visible():
                     click_and_wait(page, page.get_by_text("로그인", exact=True).filter(visible=True).first,
                                    login_form.is_visible, stage, allow_login=True)
+                log(f"{stage} 확인 완료")
                 stage = "로그인 입력"
                 login_form.fill(os.environ["BUS_USERNAME"])
                 page.locator('input[type="password"]').fill(os.environ["BUS_PASSWORD"])
+                log(f"{stage} 완료")
                 dialogs.clear()
                 stage = "로그인 완료"
                 click_and_wait(page, page.get_by_role("button", name="로그인", exact=True),
                                lambda: "/login.html" not in page.url and page.locator("#ln_direct1").is_visible()
                                and page.locator('select[name="ln_idx"]').is_visible(),
                                stage, allow_login=True, dialogs=dialogs)
+                log("로그인 완료")
 
                 stage = "방향 선택"
                 direction = page.locator("#ln_direct1" if cfg["direction"] == "in" else "#ln_direct2")
                 if not direction.is_checked():
                     click_and_wait(page, direction, lambda: direction.is_checked() and
                                    page.locator('select[name="ln_idx"]').is_visible(), stage)
+                log(f"{stage} 완료")
                 stage = "노선 선택"
                 select_line(page, cfg["line_keyword"])
+                log(f"{stage} 완료")
                 stage = "배차 조회"
                 click_and_wait(page, page.get_by_role("button", name="조회", exact=True),
                                lambda: schedules_ready(page), stage)
+                log(f"{stage} 완료")
                 stage = "배차 선택"
                 row, picked_time = select_schedule_row_by_time(page, cfg["dispatch_time_kw"])
-                log(f"대상 배차: {picked_time}")
+                log(f"대상 배차 확인: {picked_time}")
                 click_and_wait(page, row.get_by_text("예약", exact=True).filter(visible=True).first,
                                lambda: page.locator('tr:visible input[type="radio"]:visible').count() > 0,
                                "탑승장소 화면")
+                log(f"{stage} 완료")
                 stage = "탑승장소 선택"
                 row = find_visible_row_with_radio(page, cfg["board_station_kw"])
                 click_and_wait(page, row.locator('input[type="radio"]:visible'),
                                lambda: page.locator('#selSeatNum').is_visible() and
                                page.locator('td[class*="vwSeatTd"]:visible').count() > 0, "좌석 화면")
+                log(f"{stage} 완료")
                 stage = "좌석 파싱"
                 seats = extract_seat_availability(page)
+                log(f"{stage} 완료")
                 if enabled("LH_BUSRO_DEBUG_DUMP"):
                     save_diagnostics(page, attempt)
                 return Result("checked", seats, redact(page.url))
             except ScheduleClosed:
+                log("배차 선택: 대상 배차 마감 확인")
                 return Result("closed")
             except Exception as error:
                 log(f"실패 단계={stage}, 시도={attempt}, 소요={time.monotonic() - started:.1f}초\n{traceback.format_exc()}")
